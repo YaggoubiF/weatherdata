@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>نقشه آب و هوا (ECMWF)</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        /* استایل‌های قبلی بدون تغییر */
+        .weather-box {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px;
+            border-radius: 8px;
+            background: #f9f9f9;
+        }
+        h3 { color: #2c3e50; }
+        p { margin: 5px 0; }
+        #map { 
+            height: 500px; 
+            width: 100%;
+            margin-bottom: 20px;
+        }
+        #weather-result {
+            padding: 20px;
+            font-family: Tahoma;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+        }
+        .weather-box {
+            flex: 1;
+            min-width: 250px;
+            max-width: 300px;
+        }
+        .error-box {
+            color: red;
+            text-align: center;
+            padding: 20px;
+            background: #ffe6e6;
+            border-radius: 8px;
+            margin: 10px;
+        }
+        .coordinates {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <!-- بخش کنترل دسترسی -->
+    <script>
+        // 🔐 تنظیمات امنیتی
+        const SECRET_TOKEN = "farm123"; // رمز عبور دلخواه خود را اینجا قرار دهید
+        
+        // 🔍 بررسی توکن در URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const userToken = urlParams.get('token');
+
+        if (userToken !== SECRET_TOKEN) {
+            document.body.innerHTML = `
+                <div style="text-align:center; padding:50px; font-family:Tahoma; color:red">
+                    <h2>⚠️ دسترسی غیرمجاز</h2>
+                    <p>برای دسترسی به این صفحه نیاز به توکن معتبر دارید</p>
+                    <p style="color: #666; margin-top:20px;">لطفا از لینک ارائه شده توسط مدیر سیستم استفاده کنید</p>
+                </div>
+            `;
+            throw new Error("Invalid access token"); // توقف اجرای اسکریپت
+        }
+    </script>
+
+    <div class="coordinates" id="coordinates">مختصات: ---</div>
+    <div id="map"></div>
+    <div id="weather-result"></div>
+
+    <script>
+        // بقیه کدهای نقشه و آب و هوا بدون تغییر
+        // تنظیم نقشه روی مختصات ایران
+        const map = L.map('map').setView([32.4279, 53.6880], 5);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        let currentMarker = null;
+
+        map.on('mousemove', (e) => {
+            const lat = e.latlng.lat.toFixed(2);
+            const lng = e.latlng.lng.toFixed(2);
+            document.getElementById('coordinates').innerHTML = `مختصات: ${lat}, ${lng}`;
+        });
+
+        map.on('click', async (e) => {
+            const lat = e.latlng.lat.toFixed(2);
+            const lng = e.latlng.lng.toFixed(2);
+            
+            if (currentMarker) {
+                map.removeLayer(currentMarker);
+            }
+
+            document.getElementById('weather-result').innerHTML = '<div class="weather-box">در حال دریافت اطلاعات...</div>';
+            
+            try {
+                const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,shortwave_radiation_sum,et0_fao_evapotranspiration&timezone=auto&past_days=1`;
+                
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`خطای HTTP: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (!data.daily) {
+                    throw new Error('داده‌های دریافتی نامعتبر هستند');
+                }
+
+                const weatherHTML = data.daily.time.map((date, i) => {
+                    const persianDate = new Date(date).toLocaleDateString('fa-IR');
+                    const temp_max = data.daily.temperature_2m_max[i]?.toFixed(1) || '---';
+                    const temp_min = data.daily.temperature_2m_min[i]?.toFixed(1) || '---';
+                    const precip = data.daily.precipitation_sum[i]?.toFixed(1) || '---';
+                    const wind = data.daily.wind_speed_10m_max[i]?.toFixed(1) || '---';
+                    const radiation = data.daily.shortwave_radiation_sum[i]?.toFixed(1) || '---';
+                    const evap = data.daily.et0_fao_evapotranspiration[i]?.toFixed(1) || '---';
+
+                    return `
+                        <div class="weather-box">
+                            <h3>📅 ${persianDate}</h3>
+                            <p>🔥 حداکثر دما: ${temp_max}°C</p>
+                            <p>❄️ حداقل دما: ${temp_min}°C</p>
+                            <p>🌧️ مجموع بارش: ${precip} mm</p>
+                            <p>🌪️ حداکثر سرعت باد: ${wind} km/h</p>
+                            <p>☀️ تابش خورشید: ${radiation} MJ/m²</p>
+                            <p>💧 تبخیر و تعرق: ${evap} mm</p>
+                        </div>
+                    `;
+                }).join('');
+                
+                document.getElementById('weather-result').innerHTML = weatherHTML;
+                
+                currentMarker = L.marker([lat, lng])
+                    .addTo(map)
+                    .bindPopup(`مختصات: ${lat}, ${lng}`)
+                    .openPopup();
+                    
+            } catch (error) {
+                console.error('خطا:', error);
+                document.getElementById('weather-result').innerHTML = `
+                    <div class="error-box">
+                        <h3>خطا در دریافت اطلاعات</h3>
+                        <p>${error.message}</p>
+                        <p>لطفاً دوباره تلاش کنید.</p>
+                    </div>`;
+            }
+        });
+    </script>
+</body>
+</html>
